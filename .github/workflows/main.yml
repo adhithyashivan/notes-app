@@ -1,0 +1,54 @@
+name: Deploy Python QuickNote App to Azure Web App
+
+on:
+  push:
+    branches:
+      - main # Or your deployment branch
+  workflow_dispatch: # Allows manual triggering
+
+# Permissions for checkout action
+permissions:
+  contents: read
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment: production # Optional: if you have environment-specific secrets
+
+    steps:
+    - name: 'Checkout GitHub Action'
+      uses: actions/checkout@v4
+
+    - name: 'Set up Python version'
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11' # Ensure this matches Python version in Azure App Service
+
+    - name: 'Install dependencies'
+      run: |
+        python -m venv antenv
+        source antenv/bin/activate
+        pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: 'Login to Azure'
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }} # Uses the JSON output from az ad sp create-for-rbac
+
+    - name: 'Zip artifact for deployment'
+      run: zip -r release.zip . -x ".git/*" ".github/*" "antenv/*" "*.pyc" "__pycache__/*" ".DS_Store"
+
+    - name: 'Deploy to Azure Web App'
+      uses: azure/webapps-deploy@v2
+      with:
+        app-name: ${{ secrets.AZURE_APP_NAME }}
+        resource-group: ${{ secrets.AZURE_RESOURCE_GROUP_NAME }} # Added for clarity
+        package: release.zip
+        # slot-name: 'production' # Optional: if using deployment slots
+
+    - name: 'Logout from Azure' # Good practice
+      if: always() # Run this step even if previous steps fail
+      run: |
+        az logout
+        az account clear

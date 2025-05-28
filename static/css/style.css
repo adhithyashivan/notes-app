@@ -1,0 +1,367 @@
+/* --- Global Resets & Base Styles --- */
+:root {
+    --primary-color: #007bff;
+    --secondary-color: #6c757d;
+    --light-color: #f8f9fa;
+    --dark-color: #343a40;
+    --danger-color: #dc3545;
+    --success-color: #28a745;
+    --warning-color: #ffc107;
+    --border-radius: 0.25rem;
+    --navbar-height: 60px;
+    --max-content-width: 1200px;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    line-height: 1.6;
+    color: var(--dark-color);
+    background-color: #eef2f7; /* Light grayish blue background */
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+}
+
+.app-container {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+}
+
+/* --- Navbar --- */
+.navbar {
+    background-color: var(--dark-color);
+    color: var(--light-color);
+    padding: 0 1rem;
+    height: var(--navbar-height);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.nav-brand {
+    font-size: 1.5rem;
+    font-weight: bold;
+}
+
+.nav-links {
+    list-style: none;
+    display: flex;
+    align-items: center;
+}
+
+.nav-links li {
+    margin-left: 1.5rem;
+}
+
+.nav-links a, .nav-links button {
+    color: var(--light-color);
+    text-decoration: none;
+    padding: 0.5rem;
+    transition: color 0.3s ease;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 1rem;
+}
+
+.nav-links a:hover, .nav-links button:hover {
+    color: var(--primary-color);
+}
+
+.nav-toggle {
+    display: none; /* Hidden by default, shown on small screens */
+    background: none;
+    border: none;
+    color: white;
+    font-size: 1.5rem;
+    cursor: pointer;
+}
+
+.hamburger {
+    display: block;
+    width: 25px;
+    height: 3px;
+    background-color: white;
+    position: relative;
+    transition: transform 0.3s ease;
+}
+.hamburger::before,
+.hamburger::after {
+    content: '';
+    position: absolute;
+    width: 25px;
+    height: 3px;
+    background-color: white;
+    left: 0;
+    transition: transform 0.3s ease, top 0.3s ease, bottom 0.3s ease;
+}
+.hamburger::before { top: -8px; }
+.hamburger::after { bottom: -8px; }
+
+
+/* --- Main Content --- */
+.main-content {
+    flex-grow: 1;
+    padding: 1.5rem;
+    max-width: var(--max-content-width);
+    margin: 0 auto; /* Center content */
+    width: 100%;
+}
+
+section {
+    background-color: #fff;
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+    border-radius: var(--border-radius);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+h2 {
+    color: var(--primary-color);
+    margin-bottom: 1rem;
+    border-bottom: 2px solid var(--primary-color);
+    padding-bottom: 0.5rem;
+}
+
+/* --- Forms --- */
+.form-group {
+    margin-bottom: 1rem;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: bold;
+}
+
+.form-group input[type="text"],
+.form-group #editor /* Quill editor */ {
+    width: 100%;
+    padding: 0.5rem;
+    border: 1px solid #ccc;
+    border-radius: var(--border-radius);
+    font-size: 1rem;
+}
+.form-group input[type="text"]:focus,
+.form-group #editor .ql-editor:focus { /* Quill specific focus */
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 0.2rem rgba(0,123,255,.25);
+}
+
+/* Quill editor specific styling */
+#editor {
+    background-color: #fff; /* Ensure editor background is white */
+}
+.ql-toolbar {
+    border-top-left-radius: var(--border-radius);
+    border-top-right-radius: var(--border-radius);
+}
+.ql-container {
+    border-bottom-left-radius: var(--border-radius);
+    border-bottom-right-radius: var(--border-radius);
+}
+
+
+.char-count {
+    font-size: 0.9em;
+    color: var(--secondary-color);
+    text-align: right;
+    margin-top: 0.5rem;
+}
+
+/* --- Buttons --- */
+.btn {
+    display: inline-block;
+    padding: 0.6rem 1.2rem;
+    font-size: 1rem;
+    font-weight: bold;
+    text-align: center;
+    text-decoration: none;
+    cursor: pointer;
+    border: none;
+    border-radius: var(--border-radius);
+    transition: background-color 0.3s ease, transform 0.1s ease;
+}
+
+.btn-primary {
+    background-color: var(--primary-color);
+    color: white;
+}
+.btn-primary:hover {
+    background-color: #0056b3;
+}
+.btn:active {
+    transform: translateY(1px);
+}
+
+.btn-premium {
+    background-color: var(--warning-color);
+    color: var(--dark-color);
+}
+.btn-premium:hover {
+    background-color: #e0a800;
+}
+
+
+/* --- Notes Display --- */
+.notes-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1.5rem;
+}
+
+.note-card {
+    background-color: var(--light-color);
+    border: 1px solid #e0e0e0;
+    border-left: 5px solid var(--primary-color);
+    border-radius: var(--border-radius);
+    padding: 1rem;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden; /* Important for content that might overflow */
+}
+
+.note-card h3 {
+    font-size: 1.25rem;
+    color: var(--dark-color);
+    margin-bottom: 0.5rem;
+    word-break: break-word; /* Prevent long titles from breaking layout */
+}
+
+.note-card-content {
+    flex-grow: 1;
+    margin-bottom: 0.75rem;
+    font-size: 0.95rem;
+    line-height: 1.5;
+    max-height: 200px; /* Limit initial display height */
+    overflow-y: auto; /* Allow scrolling for long content */
+    word-break: break-word; /* Break long words/strings */
+}
+/* Style for Quill content - especially code blocks */
+.note-card-content pre.ql-syntax {
+    background-color: #282c34; /* Dark background for code blocks */
+    color: #abb2bf;
+    padding: 1em;
+    overflow-x: auto;
+    border-radius: var(--border-radius);
+    margin: 0.5em 0;
+}
+.note-card-content p {
+    margin-bottom: 0.5em;
+}
+.note-card-content ul, .note-card-content ol {
+    padding-left: 1.5em;
+    margin-bottom: 0.5em;
+}
+
+
+.note-card-timestamp {
+    font-size: 0.8rem;
+    color: var(--secondary-color);
+    text-align: right;
+    margin-top: auto; /* Pushes timestamp to the bottom */
+}
+
+/* --- Utility Classes --- */
+.error-message {
+    color: var(--danger-color);
+    background-color: #f8d7da;
+    border: 1px solid #f5c6cb;
+    padding: 0.75rem;
+    border-radius: var(--border-radius);
+    margin-top: 0.5rem;
+}
+
+.info-message {
+    color: var(--secondary-color);
+    background-color: #e2e3e5;
+    border: 1px solid #d6d8db;
+    padding: 0.75rem;
+    border-radius: var(--border-radius);
+    margin-top: 1rem;
+    text-align: center;
+}
+
+/* --- Footer --- */
+.footer {
+    background-color: var(--dark-color);
+    color: var(--light-color);
+    text-align: center;
+    padding: 1rem;
+    margin-top: auto; /* Pushes footer to the bottom */
+}
+
+/* --- Responsive Design --- */
+@media (max-width: 768px) {
+    .nav-links {
+        display: none; /* Hide links by default on small screens */
+        flex-direction: column;
+        width: 100%;
+        position: absolute;
+        top: var(--navbar-height);
+        left: 0;
+        background-color: var(--dark-color);
+        padding-bottom: 1rem;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .nav-links.active {
+        display: flex; /* Show when active */
+    }
+
+    .nav-links li {
+        margin: 0.5rem 0;
+        text-align: center;
+    }
+
+    .nav-toggle {
+        display: block; /* Show hamburger */
+    }
+
+    .nav-toggle.active .hamburger {
+        transform: rotate(45deg);
+    }
+    .nav-toggle.active .hamburger::before {
+        transform: rotate(90deg);
+        top: 0;
+    }
+    .nav-toggle.active .hamburger::after {
+        transform: rotate(90deg);
+        bottom: 0;
+        opacity: 0; /* Hide bottom bar or also rotate */
+    }
+
+    .main-content {
+        padding: 1rem;
+    }
+
+    .notes-grid {
+        grid-template-columns: 1fr; /* Single column on small screens */
+    }
+}
+
+@media (max-width: 480px) {
+    .nav-brand {
+        font-size: 1.2rem;
+    }
+    h2 {
+        font-size: 1.5rem;
+    }
+    .btn {
+        padding: 0.5rem 1rem;
+        font-size: 0.9rem;
+    }
+}
