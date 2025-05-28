@@ -1,427 +1,380 @@
+# scripts/doc_generator.py
+
 import os
-import requests  # For Confluence API
-import openai   # For OpenAI API
-import json
 import sys
-from requests.auth import HTTPBasicAuth
+import json
 import time  # For potential rate limiting
 
-# --- Configuration ---
-# These values will be injected by the GitHub Actions workflow as environment variables.
-# DO NOT HARDCODE SENSITIVE KEYS DIRECTLY IN THE SCRIPT IN A REAL SCENARIO.
+# Attempt to import necessary libraries, provide guidance if missing
+try:
+    import openai
+except ImportError:
+    print("OpenAI library not found. Please install it: pip install openai")
+    sys.exit(1)
 
-# For OpenAI API:
-# In GitHub Actions, this would be set from a secret: ${{ secrets.OPENAI_API_KEY }}
-# Example value you provided: "ABC1212121" (This is just for illustration)
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-if not OPENAI_API_KEY:
-    print("Error: OPENAI_API_KEY environment variable not set.")
-    # OPENAI_API_KEY = "ABC1212121" # << ONLY FOR LOCAL TESTING, REMOVE FOR CI/CD
-    # sys.exit(1) # Uncomment this line in production if key is missing
+try:
+    import requests
+    from requests.auth import HTTPBasicAuth
+except ImportError:
+    print("Requests library not found. Please install it: pip install requests")
+    sys.exit(1)
 
-# For Confluence:
-# Your Confluence site base URL (up to '/wiki')
-# In GitHub Actions, this would be set from a secret: ${{ secrets.CONFLUENCE_URL }}
-# Example based on your provided URL: "https://test-test.atlassian.net/wiki"
-CONFLUENCE_BASE_URL = os.environ.get("CONFLUENCE_URL")
-if not CONFLUENCE_BASE_URL:
-    print("Error: CONFLUENCE_URL environment variable not set.")
-    # CONFLUENCE_BASE_URL = "https://test-test.atlassian.net/wiki" # << ONLY FOR LOCAL TESTING
-    # sys.exit(1) # Uncomment this line in production if URL is missing
+# --- Configuration for Ignored Items ---
+# Folders to completely ignore (and their subfolders)
+IGNORED_FOLDERS = {
+    "venv",         # Common virtual environment folder
+    "antenv",       # Another virtual environment folder name you used
+    ".git",         # Git repository data
+    ".github",      # GitHub specific files (workflows, etc.)
+    "__pycache__",  # Python bytecode cache
+    "node_modules",  # Common for JS projects
+    "build",
+    "dist",
+    "static",       # Usually frontend assets, might not need LLM documentation for all files
+    "templates",    # HTML templates, might not need LLM documentation for all files
+    "scripts",      # Often utility scripts, including this one, can be excluded if desired
+    # Add any other top-level or common folders you want to skip entirely
+}
 
-# Your Atlassian account email (used for API authentication with the token)
-# In GitHub Actions, this would be set from a secret: ${{ secrets.CONFLUENCE_EMAIL }}
-CONFLUENCE_USER_EMAIL = os.environ.get("CONFLUENCE_EMAIL")
-if not CONFLUENCE_USER_EMAIL:
-    print("Error: CONFLUENCE_EMAIL environment variable not set.")
-    # sys.exit(1)
+# Specific files to ignore by name, regardless of their location (if found)
+IGNORED_FILES = {
+    ".gitignore",
+    "LICENSE",
+    "README.md",
+    "requirements.txt",
+    "Pipfile",
+    "Pipfile.lock",
+    "poetry.lock",
+    "pyproject.toml",  # Often project config, not source code for LLM
+    "app.pyc",      # Example compiled python file
+    # Add any other specific file names
+}
 
-# Your Confluence API Token
-# In GitHub Actions, this would be set from a secret: ${{ secrets.CONFLUENCE_API_TOKEN }}
-CONFLUENCE_API_TOKEN = os.environ.get("CONFLUENCE_API_TOKEN")
-if not CONFLUENCE_API_TOKEN:
-    print("Error: CONFLUENCE_API_TOKEN environment variable not set.")
-    # sys.exit(1)
+# File extensions to consider for documentation (e.g., source code)
+# Set to None or empty list/set to consider all files not otherwise ignored
+TARGET_EXTENSIONS = {
+    ".py",
+    # ".js", ".html", ".css", # Add other extensions if needed
+}
 
-# The Key of your Confluence Space (e.g., "APD" from your URL)
-# In GitHub Actions, this would be set from a secret: ${{ secrets.CONFLUENCE_SPACE_KEY }}
-CONFLUENCE_SPACE_KEY = os.environ.get("CONFLUENCE_SPACE_KEY")
-if not CONFLUENCE_SPACE_KEY:
-    print("Error: CONFLUENCE_SPACE_KEY environment variable not set.")
-    # CONFLUENCE_SPACE_KEY = "APD" # << ONLY FOR LOCAL TESTING
-    # sys.exit(1)
-
-# The root directory of the code to document, relative to the repository root.
-# In GitHub Actions, this would be set via an env var in the workflow, e.g., 'app'
-CODE_ROOT_DIR_RELATIVE_PATH = os.environ.get(
-    "CODE_ROOT_PATH", "app")  # Default to 'app'
-
-# A root page title for all generated docs for this project/run.
-# In GitHub Actions, this could be: ${{ github.repository }} - Automated Docs
-ROOT_DOC_PROJECT_TITLE = os.environ.get(
-    "ROOT_DOC_TITLE", "Project Documentation")
-
-# --- Initialize OpenAI Client ---
-# Ensure the API key is set before trying to initialize the client
-if OPENAI_API_KEY:
-    try:
-        client = openai.OpenAI(api_key=OPENAI_API_KEY)
-    except Exception as e:
-        print(f"Error initializing OpenAI client: {e}")
-        client = None  # Ensure client is None if initialization fails
-else:
-    client = None
-    print("OpenAI client not initialized because API key is missing.")
+# --- Helper Functions for Ignoring Items ---
 
 
-# --- Helper Functions ---
+def should_ignore_dir(dir_name):
+    """Checks if a directory name is in the IGNORED_FOLDERS set."""
+    return dir_name.lower() in IGNORED_FOLDERS
 
-def get_ai_documentation(file_content, file_path):
-    """Generates documentation for a Python file using OpenAI."""
-    if not client:
-        print(
-            f"OpenAI client not available. Skipping AI documentation for {file_path}.")
-        return f"Error: OpenAI client not initialized. Could not generate documentation for {file_path}."
 
-    # Enhanced prompt for better structure and Confluence compatibility
-    prompt = f"""
-    Please act as an expert technical writer. Analyze the following Python code from the file '{file_path}'.
-    Generate documentation in Confluence Wiki Markup format.
+def should_ignore_file(file_name):
+    """Checks if a file name is in the IGNORED_FILES set."""
+    return file_name.lower() in IGNORED_FILES
 
-    The documentation should include:
-    1.  *File Overview:* A concise summary of the file's purpose, its main components, and any key dependencies it might imply (at a high level).
-    2.  *Classes (if any):* For each class:
-        *   Class Name and Signature (e.g., `h3. Class: MyClass(BaseClass)`)
-        *   Purpose: A clear description of what the class does.
-        *   Key Attributes: Important instance or class variables and their roles.
-        *   Methods: For each method (including `__init__`):
-            *   Method Signature (e.g., `h4. Method: my_method(self, param1, param2=None)`)
-            *   Purpose: What the method does.
-            *   Parameters: A list of parameters with their expected types and descriptions (e.g., `* param1 (int): Description of param1.`).
-            *   Returns: What the method returns, including type (e.g., `* Returns: (str) Description of return value.`).
-    3.  *Functions (if any, not part of a class):* For each function:
-        *   Function Signature (e.g., `h3. Function: my_global_function(param1)`)
-        *   Purpose: What the function does.
-        *   Parameters: A list of parameters with their types and descriptions.
-        *   Returns: What the function returns, including type.
-    4.  *Usage Example (Optional but Recommended):* If feasible, a brief code snippet showing how to use a key function or class from this file.
 
-    Use Confluence Wiki Markup:
-    - Headings: `h1.`, `h2.`, `h3.`, `h4.`
-    - Bold: `*text*`
-    - Italics: `_text_`
-    - Unordered lists: `* item` (star followed by a space)
-    - Code blocks: `{{{{code:python}}}} ... {{{{code}}}}` or `{{{{noformat}}}} ... {{{{noformat}}}}` for simple code snippets.
+def has_target_extension(file_name):
+    """Checks if the file has one of the TARGET_EXTENSIONS."""
+    if not TARGET_EXTENSIONS:  # If no specific extensions, consider all (that are not ignored)
+        return True
+    _, ext = os.path.splitext(file_name)
+    return ext.lower() in TARGET_EXTENSIONS
 
-    Here is the code content:
-    ---- START OF CODE ----
-    {file_content}
-    ---- END OF CODE ----
 
-    Provide only the Confluence Wiki Markup content for the page body.
+# --- Core Logic Functions ---
+def find_files_to_document(code_root_path):
     """
-    max_retries = 3
-    retry_delay = 5  # seconds
-    for attempt in range(max_retries):
-        try:
-            response = client.chat.completions.create(
-                model="gpt-3.5-turbo",  # Or "gpt-4" if you have access and budget
-                messages=[
-                    {"role": "system", "content": "You are an expert technical writer generating Confluence Wiki Markup documentation for Python code."},
-                    {"role": "user", "content": prompt}
-                ]
-            )
-            return response.choices[0].message.content.strip()
-        except openai.RateLimitError as e:
-            print(
-                f"OpenAI Rate Limit Error for {file_path}: {e}. Retrying in {retry_delay}s... (Attempt {attempt+1}/{max_retries})")
-            time.sleep(retry_delay)
-            retry_delay *= 2  # Exponential backoff
-        except Exception as e:
-            print(f"Error calling OpenAI for {file_path}: {e}")
-            return f"h2. Error Generating Documentation\n\nAn error occurred while generating AI documentation for {file_path}:\n{{{{noformat}}}}\n{e}\n{{{{noformat}}}}"
+    Walks through the code_root_path and collects files to be documented,
+    respecting the ignore lists.
+    """
+    files_for_documentation = []
 
+    if not os.path.isdir(code_root_path):
+        print(
+            f"Error: Provided code root path '{code_root_path}' is not a valid directory.")
+        return files_for_documentation
+
+    abs_code_root_path = os.path.abspath(code_root_path)
+    print(f"Starting scan in: {abs_code_root_path}")
+    print(f"Ignoring folders: {IGNORED_FOLDERS}")
+    print(f"Ignoring files: {IGNORED_FILES}")
     print(
-        f"Failed to get documentation from OpenAI for {file_path} after {max_retries} retries.")
-    return f"h2. Error Generating Documentation\n\nFailed to retrieve documentation from OpenAI for {file_path} after multiple retries due to rate limiting or other API issues."
+        f"Targeting extensions: {TARGET_EXTENSIONS if TARGET_EXTENSIONS else 'All (not ignored)'}")
+    print("-" * 30)
+
+    for root, dirs, files in os.walk(abs_code_root_path, topdown=True):
+        # --- Directory Exclusion ---
+        dirs[:] = [d for d in dirs if not should_ignore_dir(d)]
+
+        relative_path_from_root = os.path.relpath(root, abs_code_root_path)
+        display_path = relative_path_from_root if relative_path_from_root != "." else "[root]"
+        # print(f"Scanning in: {display_path}") # Verbose logging
+
+        for file_name in files:
+            if should_ignore_file(file_name):
+                # print(f"  Ignoring specific file: {os.path.join(display_path, file_name)}")
+                continue
+
+            if not has_target_extension(file_name):
+                # print(f"  Ignoring file due to extension: {os.path.join(display_path, file_name)}")
+                continue
+
+            full_path = os.path.join(root, file_name)
+            files_for_documentation.append(full_path)
+            # print(f"  Collecting: {os.path.join(display_path, file_name)}")
+
+    return files_for_documentation
 
 
-def get_confluence_page_id_and_version(title, space_key):
-    """Checks if a page with the given title exists and returns its ID and version number."""
-    if not CONFLUENCE_BASE_URL or not CONFLUENCE_USER_EMAIL or not CONFLUENCE_API_TOKEN:
-        print(
-            f"Confluence API credentials or URL not set. Cannot search for page '{title}'.")
-        return None, None
-
-    api_url = f"{CONFLUENCE_BASE_URL}/rest/api/content"
-    auth = HTTPBasicAuth(CONFLUENCE_USER_EMAIL, CONFLUENCE_API_TOKEN)
-    headers = {"Accept": "application/json"}
-    params = {"title": title, "spaceKey": space_key, "expand": "version"}
-
+def generate_documentation_for_file(file_path, openai_client):
+    """
+    Generates documentation for a single file using OpenAI.
+    IMPLEMENT THE ACTUAL OPENAI LOGIC HERE.
+    """
+    print(f"\n--- Attempting to generate documentation for: {file_path} ---")
     try:
-        response = requests.get(api_url, headers=headers,
-                                params=params, auth=auth, timeout=30)
-        response.raise_for_status()
-        results = response.json().get("results", [])
-        if results:
-            page_id = results[0]["id"]
-            version_number = results[0]['version']['number']
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+
+        if not content.strip():
             print(
-                f"Found existing page '{title}' (ID: {page_id}, Version: {version_number})")
-            return page_id, version_number
-        print(f"Page '{title}' not found in space '{space_key}'.")
-        return None, None
-    except requests.exceptions.RequestException as e:
-        print(f"Error checking Confluence page '{title}': {e}")
-        if hasattr(response, 'text'):
-            print(f"Response content: {response.text}")
-        return None, None
+                f"File {file_path} is empty or contains only whitespace. Skipping.")
+            return f"## Documentation for `{os.path.basename(file_path)}`\n\nFile is empty."
 
+        # Basic check for very large files to avoid huge API costs / long processing
+        # OpenAI models have token limits. Max ~16k tokens for gpt-3.5-turbo-16k, ~128k for gpt-4-turbo
+        # 1 token is roughly 4 chars in English. A 100k char file is ~25k tokens.
+        if len(content) > 80000:  # Adjust based on your model and budget (e.g. 80k chars ~ 20k tokens)
+            print(
+                f"Warning: File {file_path} is very large ({len(content)} chars). Truncating for OpenAI processing.")
+            # Consider summarizing locally first or processing in chunks if this is common
+            content = content[:80000] + "\n\n[CONTENT TRUNCATED DUE TO LENGTH]"
 
-def create_or_update_confluence_page(title, body_content, space_key, parent_id=None):
-    """Creates or updates a Confluence page."""
-    if not CONFLUENCE_BASE_URL or not CONFLUENCE_USER_EMAIL or not CONFLUENCE_API_TOKEN:
+        prompt = (
+            f"Generate concise technical documentation for the following code file named '{os.path.basename(file_path)}'. "
+            "Focus on its purpose, main functions/classes, inputs, outputs, and key logic. "
+            "Format the output in Markdown.\n\n"
+            f"File Content:\n```\n{content}\n```"
+        )
+
+        # --- OpenAI API Call (IMPLEMENT THIS) ---
+        print(f"Sending content of {os.path.basename(file_path)} to OpenAI...")
+        response = openai_client.chat.completions.create(
+            model="gpt-3.5-turbo",  # Or "gpt-4-turbo" or your preferred model
+            messages=[
+                {"role": "system", "content": "You are an expert technical writer assistant specializing in clear and concise code documentation in Markdown format."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.3,  # Lower temperature for more factual/deterministic output
+            max_tokens=1500  # Adjust based on expected documentation length
+        )
+        documentation = response.choices[0].message.content
         print(
-            f"Confluence API credentials or URL not set. Cannot publish page '{title}'.")
-        return None
+            f"Received documentation from OpenAI for {os.path.basename(file_path)}")
+        return documentation
 
-    api_url_base = f"{CONFLUENCE_BASE_URL}/rest/api/content"
-    auth = HTTPBasicAuth(CONFLUENCE_USER_EMAIL, CONFLUENCE_API_TOKEN)
-    headers = {"Accept": "application/json",
-               "Content-Type": "application/json"}
+    except openai.APIError as e:
+        print(f"OpenAI API Error processing file {file_path}: {e}")
+        return f"## Error generating documentation for `{os.path.basename(file_path)}`\n\nOpenAI API Error: {e}"
+    except Exception as e:
+        print(f"Unexpected error processing file {file_path}: {e}")
+        return f"## Error generating documentation for `{os.path.basename(file_path)}`\n\nUnexpected error: {e}"
 
-    page_id, current_version = get_confluence_page_id_and_version(
-        title, space_key)
 
-    data = {
+def get_confluence_page_id(confluence_url, auth, space_key, title):
+    """Helper to check if a page exists and get its ID."""
+    search_url = f"{confluence_url.rstrip('/')}/rest/api/content"
+    params = {
+        "spaceKey": space_key,
+        "title": title,
+        "expand": "version"  # To get version number for updates
+    }
+    try:
+        response = requests.get(search_url, auth=auth, params=params, headers={
+                                "Content-Type": "application/json"}, timeout=10)
+        response.raise_for_status()
+        results = response.json().get('results', [])
+        if results:
+            return results[0]['id'], results[0]['version']['number']
+    except requests.exceptions.RequestException as e:
+        print(f"Error searching for Confluence page '{title}': {e}")
+    return None, None
+
+
+def create_or_update_confluence_page(confluence_url, auth, space_key, title, body_content, parent_id=None):
+    """
+    Creates or updates a page in Confluence.
+    IMPLEMENT THE ACTUAL CONFLUENCE LOGIC HERE.
+    """
+    page_id, current_version = get_confluence_page_id(
+        confluence_url, auth, space_key, title)
+    rest_url = f"{confluence_url.rstrip('/')}/rest/api/content"
+
+    page_data = {
         "type": "page",
         "title": title,
         "space": {"key": space_key},
         "body": {
-            "wiki": {  # Using Confluence Wiki Markup
+            "storage": {  # Use storage format for Markdown (needs conversion or a macro)
+                # For true Markdown, you might need a Markdown macro or pre-convert to Confluence storage format
                 "value": body_content,
-                "representation": "wiki"
+                "representation": "storage"  # Or "wiki" if you provide wiki markup
             }
         }
     }
-
     if parent_id:
-        # Ensure parent_id is string
-        data["ancestors"] = [{"id": str(parent_id)}]
+        page_data["ancestors"] = [{"id": parent_id}]
 
-    max_retries = 3
-    retry_delay = 5  # seconds
-    for attempt in range(max_retries):
-        try:
-            if page_id:  # Update existing page
-                data["id"] = page_id
-                data["version"] = {"number": current_version + 1}
-                api_url_specific = f"{api_url_base}/{page_id}"
-                response = requests.put(api_url_specific, headers=headers, data=json.dumps(
-                    data), auth=auth, timeout=30)
-                action_taken = "Updating"
-            else:  # Create new page
-                api_url_specific = api_url_base
-                response = requests.post(
-                    api_url_specific, headers=headers, data=json.dumps(data), auth=auth, timeout=30)
-                action_taken = "Creating"
+    try:
+        if page_id:  # Update existing page
+            page_data["id"] = page_id
+            page_data["version"] = {"number": current_version + 1}
+            print(f"Updating Confluence page: '{title}' (ID: {page_id})")
+            response = requests.put(f"{rest_url}/{page_id}", auth=auth, json=page_data, headers={
+                                    "Content-Type": "application/json"}, timeout=15)
+        else:  # Create new page
+            print(f"Creating Confluence page: '{title}'")
+            response = requests.post(rest_url, auth=auth, json=page_data, headers={
+                                     "Content-Type": "application/json"}, timeout=15)
 
-            print(
-                f"{action_taken} page '{title}' (Attempt {attempt+1}/{max_retries})...")
-            response.raise_for_status()  # Will raise HTTPError for bad responses (4xx or 5xx)
-
-            new_page_id = response.json().get("id")
-            print(
-                f"Successfully {action_taken.lower()} Confluence page: '{title}' (ID: {new_page_id})")
-            return new_page_id
-
-        except requests.exceptions.HTTPError as e:
-            print(
-                f"HTTP Error {action_taken.lower()} Confluence page '{title}': {e.response.status_code} - {e.response.reason}")
-            print(f"Response content: {e.response.text}")
-            if e.response.status_code == 409:  # Conflict, likely version mismatch or concurrent edit
-                print(
-                    "Conflict error (409) detected. Page might have been updated. Re-fetching version...")
-                page_id, current_version = get_confluence_page_id_and_version(
-                    title, space_key)  # Re-fetch
-                if page_id is None:  # Page was deleted in the meantime
-                    print("Page seems to have been deleted. Attempting to create.")
-                    # Reset page_id to allow creation in next attempt, if any
-                    page_id = None
-                    current_version = None  # Reset version as well
-                    continue  # Retry immediately with create logic
-            # For other errors, or if retries exhausted for 409
-            if attempt < max_retries - 1:
-                print(f"Retrying in {retry_delay}s...")
-                time.sleep(retry_delay)
-                retry_delay *= 2
-            else:
-                print(
-                    f"Failed to {action_taken.lower()} page '{title}' after {max_retries} attempts.")
-                return None
-        except requests.exceptions.RequestException as e:  # Other network issues
-            print(
-                f"Request Error {action_taken.lower()} Confluence page '{title}': {e}")
-            if attempt < max_retries - 1:
-                print(f"Retrying in {retry_delay}s...")
-                time.sleep(retry_delay)
-                retry_delay *= 2
-            else:
-                print(
-                    f"Failed to {action_taken.lower()} page '{title}' after {max_retries} attempts due to network issues.")
-                return None
-    return None  # Should be unreachable if loop logic is correct
-
-
-def process_directory_recursively(current_dir_abs_path, space_key, current_confluence_parent_id, code_base_dir_abs_path):
-    """
-    Recursively processes directories and files to generate documentation.
-    Creates corresponding parent/child pages in Confluence.
-    `current_dir_abs_path`: Absolute path of the directory currently being processed.
-    `code_base_dir_abs_path`: Absolute path of the root directory for documentation (e.g., .../workspace/app).
-    """
-    print(f"Processing directory: {current_dir_abs_path}")
-
-    # Sort items to ensure consistent page ordering
-    items_in_dir = sorted(os.listdir(current_dir_abs_path))
-
-    for item_name in items_in_dir:
-        item_abs_path = os.path.join(current_dir_abs_path, item_name)
-        # Path relative to the initial CODE_ROOT_DIR_RELATIVE_PATH (e.g., "utils/calculator.py" or "main.py")
-        item_relative_to_code_base = os.path.relpath(
-            item_abs_path, code_base_dir_abs_path)
-
-        if os.path.isdir(item_abs_path):
-            # Create a Confluence page for this subdirectory
-            # Title format: "Project Root Title: path / to / subdir"
-            dir_page_title = f"{ROOT_DOC_PROJECT_TITLE}: {item_relative_to_code_base.replace(os.sep, ' / ')}"
-            print(f"  Creating/Updating directory page: '{dir_page_title}'")
-
-            # Simple content for directory page
-            dir_content = f"h1. Directory: {item_name}\n\nThis page contains documentation for modules and subdirectories within '{item_name}'."
-
-            new_parent_id_for_children = create_or_update_confluence_page(
-                dir_page_title,
-                dir_content,
-                space_key,
-                current_confluence_parent_id
-            )
-
-            if new_parent_id_for_children:
-                process_directory_recursively(
-                    item_abs_path, space_key, new_parent_id_for_children, code_base_dir_abs_path)
-            else:
-                print(
-                    f"  Skipping subdirectory '{item_abs_path}' due to error creating/updating its Confluence page.")
-
-        elif item_name.endswith(".py"):
-            print(f"  Processing Python file: {item_abs_path}")
-            # Title format: "Project Root Title: path/to/file.py"
-            file_page_title = f"{ROOT_DOC_PROJECT_TITLE}: {item_relative_to_code_base}"
-
-            try:
-                with open(item_abs_path, 'r', encoding='utf-8') as f:
-                    file_content = f.read()
-
-                if not file_content.strip():
-                    print(f"  Skipping empty file: {item_abs_path}")
-                    continue
-
-                print(
-                    f"    Generating AI documentation for: '{file_page_title}'")
-                ai_doc_content = get_ai_documentation(
-                    file_content, item_relative_to_code_base)
-
-                if ai_doc_content:
-                    print(
-                        f"    Publishing documentation to Confluence for: '{file_page_title}'")
-                    create_or_update_confluence_page(
-                        file_page_title,
-                        ai_doc_content,
-                        space_key,
-                        current_confluence_parent_id
-                    )
-                else:
-                    print(
-                        f"    No documentation content generated by AI for {item_abs_path}")
-
-            except Exception as e:
-                print(f"  Error processing file {item_abs_path}: {e}")
-        else:
-            print(f"  Skipping non-Python file or non-directory: {item_name}")
+        response.raise_for_status()
+        print(
+            f"Successfully {'updated' if page_id else 'created'} page '{title}'. Link: {response.json().get('_links', {}).get('webui', '')}")
+        return response.json().get('id')
+    except requests.exceptions.HTTPError as e:
+        print(
+            f"HTTP Error during Confluence operation for page '{title}': {e.response.status_code} - {e.response.text}")
+    except requests.exceptions.RequestException as e:
+        print(
+            f"Request Error during Confluence operation for page '{title}': {e}")
+    except Exception as e:
+        print(
+            f"Unexpected error during Confluence operation for page '{title}': {e}")
+    return None
 
 
 # --- Main Execution ---
 if __name__ == "__main__":
-    # Basic check for essential configs
-    if not all([OPENAI_API_KEY, CONFLUENCE_BASE_URL, CONFLUENCE_USER_EMAIL, CONFLUENCE_API_TOKEN, CONFLUENCE_SPACE_KEY]):
-        print("CRITICAL ERROR: One or more essential environment variables for API access are missing.")
-        print("Required: OPENAI_API_KEY, CONFLUENCE_URL, CONFLUENCE_EMAIL, CONFLUENCE_API_TOKEN, CONFLUENCE_SPACE_KEY")
-        sys.exit(1)  # Exit if critical credentials are not found
+    print("Doc Generator Script Started")
 
-    if not client:  # Check if OpenAI client was initialized
-        print("CRITICAL ERROR: OpenAI client could not be initialized. Check API key and network.")
+    # Retrieve secrets and config from environment variables
+    openai_api_key = os.getenv("OPENAI_API_KEY")
+    confluence_url = os.getenv("CONFLUENCE_URL")
+    confluence_email = os.getenv("CONFLUENCE_EMAIL")
+    confluence_api_token = os.getenv("CONFLUENCE_API_TOKEN")
+    confluence_space_key = os.getenv("CONFLUENCE_SPACE_KEY")
+    root_doc_title_env = os.getenv("ROOT_DOC_TITLE", "Project Documentation")
+    code_root_path_env = os.getenv("CODE_ROOT_PATH", ".")
+
+    required_vars_messages = {
+        "OPENAI_API_KEY": "OpenAI API Key is missing.",
+        "CONFLUENCE_URL": "Confluence URL is missing.",
+        "CONFLUENCE_EMAIL": "Confluence Email is missing.",
+        "CONFLUENCE_API_TOKEN": "Confluence API Token is missing.",
+        "CONFLUENCE_SPACE_KEY": "Confluence Space Key is missing.",
+    }
+    missing_vars = [msg for var,
+                    msg in required_vars_messages.items() if not os.getenv(var)]
+    if missing_vars:
+        for msg in missing_vars:
+            print(f"Error: {msg}")
         sys.exit(1)
 
-    print("Starting documentation generation process...")
-    print(f"  Project Title for Docs: {ROOT_DOC_PROJECT_TITLE}")
-    print(f"  Confluence Space Key: {CONFLUENCE_SPACE_KEY}")
-    print(f"  Relative Code Path to Document: '{CODE_ROOT_DIR_RELATIVE_PATH}'")
+    # --- Initialize API Clients ---
+    try:
+        openai_client = openai.OpenAI(api_key=openai_api_key)
+        confluence_auth = HTTPBasicAuth(confluence_email, confluence_api_token)
+        # Test OpenAI client (optional, but good for quick feedback)
+        # openai_client.models.list()
+        print("OpenAI client initialized.")
+        print(
+            f"Confluence authentication configured for URL: {confluence_url}")
+    except Exception as e:
+        print(f"Error initializing API clients: {e}")
+        sys.exit(1)
 
-    # Create/get the main project root page in Confluence.
-    # All other pages will be children of this page (or children of its directory sub-pages).
-    project_root_page_body = f"h1. {ROOT_DOC_PROJECT_TITLE}\n\nThis page is the root for automatically generated documentation for the project. It covers code found in the '{CODE_ROOT_DIR_RELATIVE_PATH}' directory."
+    print(f"Code root path from env: {code_root_path_env}")
+    abs_code_root_path = os.path.abspath(code_root_path_env)
 
-    # The "homepageId=111111" in your example URL (https://test-test.atlassian.net/wiki/spaces/APD/overview?homepageId=111111)
-    # refers to the ID of the *Space Homepage*. If you want your ROOT_DOC_PROJECT_TITLE page to be a child of the Space Homepage,
-    # you need to pass its ID as parent_id.
-    # However, finding the Space Homepage ID programmatically can be tricky.
-    # For simplicity, this script creates ROOT_DOC_PROJECT_TITLE directly under the space root (no parent_id).
-    # If you want it under a specific existing page (like the space homepage), you'd need to:
-    # 1. Manually find that page's ID in Confluence (often visible in the URL when editing, or via API).
-    # 2. Pass that ID as an environment variable, e.g., CONFLUENCE_ROOT_PARENT_ID_FOR_PROJECT.
-    # For now, we are not using a parent for the main project root page. It will appear at the top level of the space page tree.
+    # 1. Find files to document
+    files_to_process = find_files_to_document(abs_code_root_path)
 
-    # CONFLUENCE_OVERVIEW_PAGE_ID = "111111" # Example based on your URL, if you wanted to make it a child of this
-    # Better to pass this via env var if needed.
+    if not files_to_process:
+        print("No files found to document after applying ignore rules. Exiting.")
+        sys.exit(0)
 
+    print(f"\nFound {len(files_to_process)} files to document:")
+    for f_path in files_to_process:
+        print(f"  - {os.path.relpath(f_path, abs_code_root_path)}")
+
+    # 2. Create/Update a root Confluence page for this project's documentation
     print(
-        f"Creating/Updating the main project documentation page: '{ROOT_DOC_PROJECT_TITLE}'")
-    project_root_confluence_page_id = create_or_update_confluence_page(
-        ROOT_DOC_PROJECT_TITLE,
-        project_root_page_body,
-        CONFLUENCE_SPACE_KEY
-        # parent_id=CONFLUENCE_OVERVIEW_PAGE_ID # << Uncomment and set if you want it as a child of specific page
+        f"\nEnsuring root documentation page: '{root_doc_title_env}' in space '{confluence_space_key}'")
+    # The body for the root page can be simple.
+    # If you send Markdown here, Confluence needs to be able to render it.
+    # Using a simple text or a Confluence macro for {markdown} is safer.
+    # For this example, we'll assume you have a markdown macro or are okay with plain text + Markdown code blocks.
+    root_page_body_content = (
+        f"<p>This page serves as the root for automatically generated documentation for the project.</p>"
+        f"<p>Last updated: {time.strftime('%Y-%m-%d %H:%M:%S %Z')}</p>"
+        f"ac:name=\"markdown\">"  # Example of starting a markdown macro
+        f"### Files Documented:\n"
+        + "\n".join([f"- `{os.path.relpath(f, abs_code_root_path)}`" for f in files_to_process]) +
+        f"</ac:name>"  # Example of closing a markdown macro
     )
 
-    if project_root_confluence_page_id:
-        print(
-            f"Successfully created/updated project root page. ID: {project_root_confluence_page_id}")
+    # A more robust approach for Confluence storage format for Markdown:
+    # confluence_markdown_macro_template = '<ac:structured-macro ac:name="markdown" ac:schema-version="1"><ac:plain-text-body><![CDATA[\n{markdown_content}\n]]></ac:plain-text-body></ac:structured-macro>'
+    # root_page_body_content = confluence_markdown_macro_template.format(markdown_content="### Overview\nThis is the root page...")
 
-        # Resolve the absolute path to the code directory to be documented
-        # In GitHub Actions, GITHUB_WORKSPACE is the root of your checked-out repo.
-        # Default to current dir if not in GHA
-        github_workspace = os.environ.get("GITHUB_WORKSPACE", ".")
-        code_to_document_abs_path = os.path.abspath(
-            os.path.join(github_workspace, CODE_ROOT_DIR_RELATIVE_PATH))
+    project_root_page_id = create_or_update_confluence_page(
+        confluence_url,
+        confluence_auth,
+        confluence_space_key,
+        root_doc_title_env,
+        root_page_body_content  # This needs to be in Confluence Storage Format or use a macro
+    )
 
-        print(f"Absolute path to document: {code_to_document_abs_path}")
-
-        if os.path.isdir(code_to_document_abs_path):
-            # Start recursive processing. Files/dirs directly under code_to_document_abs_path
-            # will become children of project_root_confluence_page_id.
-            process_directory_recursively(
-                code_to_document_abs_path,
-                CONFLUENCE_SPACE_KEY,
-                project_root_confluence_page_id,
-                code_to_document_abs_path  # This is the base for relative path calculations
-            )
-            print("Documentation generation process completed.")
-        else:
-            print(
-                f"Error: The specified code path '{code_to_document_abs_path}' (from relative '{CODE_ROOT_DIR_RELATIVE_PATH}') is not a valid directory.")
-            sys.exit(1)
-    else:
-        print(
-            f"CRITICAL ERROR: Failed to create or update the main project documentation page: '{ROOT_DOC_PROJECT_TITLE}'. Aborting.")
+    if not project_root_page_id:
+        print("Error: Could not create or find the project root page in Confluence. Aborting child page creation.")
         sys.exit(1)
+
+    print(f"Project root page ID: {project_root_page_id}")
+
+    # 3. Generate documentation for each file and publish as child pages
+    for file_path in files_to_process:
+        relative_file_path = os.path.relpath(file_path, abs_code_root_path)
+        print(f"\nProcessing file: {relative_file_path}")
+
+        documentation_markdown = generate_documentation_for_file(
+            file_path, openai_client)
+
+        if "Error generating documentation" in documentation_markdown:
+            print(
+                f"Skipping Confluence update for {relative_file_path} due to generation error.")
+            continue
+
+        # Prepare content for Confluence (wrap Markdown in macro if needed)
+        # This is a common way to put Markdown into Confluence storage format
+        confluence_page_body = (
+            f"<p><em>Automatically generated documentation for <code>{relative_file_path}</code>.</em></p>"
+            f"<p><em>Last updated: {time.strftime('%Y-%m-%d %H:%M:%S %Z')}</em></p><hr/>"
+            # Assuming your Markdown from OpenAI is Confluence-friendly or you'll use a macro.
+            f"{documentation_markdown}"
+            # For more complex Markdown, convert to Confluence Storage Format.
+        )
+        # Example using the markdown macro explicitly:
+        # confluence_page_body = confluence_markdown_macro_template.format(markdown_content=documentation_markdown)
+
+        # e.g., "Doc: src - my_module.py"
+        page_title = f"Doc: {relative_file_path.replace(os.sep, ' - ')}"
+
+        create_or_update_confluence_page(
+            confluence_url,
+            confluence_auth,
+            confluence_space_key,
+            page_title,
+            confluence_page_body,
+            parent_id=project_root_page_id
+        )
+        # Basic rate limiting to avoid overwhelming Confluence or hitting API limits
+        time.sleep(2)
+
+    print("\nDoc Generator Script Finished.")
