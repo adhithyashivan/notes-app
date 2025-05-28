@@ -6,14 +6,13 @@ on:
       - main # Or your deployment branch
   workflow_dispatch: # Allows manual triggering
 
-# Permissions for checkout action
 permissions:
   contents: read
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-    environment: production # Optional: if you have environment-specific secrets
+    environment: production
 
     steps:
     - name: 'Checkout GitHub Action'
@@ -22,19 +21,22 @@ jobs:
     - name: 'Set up Python version'
       uses: actions/setup-python@v4
       with:
-        python-version: '3.11' # Ensure this matches Python version in Azure App Service
+        python-version: '3.11'
 
-    - name: 'Install dependencies'
+    - name: 'Install application dependencies (for deployment artifact)'
       run: |
         python -m venv antenv
         source antenv/bin/activate
         pip install --upgrade pip
         pip install -r requirements.txt
+        # Deactivate not strictly necessary here as the venv is for the zip
+        # but good practice if you were doing more in this shell.
+        # deactivate
 
     - name: 'Login to Azure'
       uses: azure/login@v1
       with:
-        creds: ${{ secrets.AZURE_CREDENTIALS }} # Uses the JSON output from az ad sp create-for-rbac
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
 
     - name: 'Zip artifact for deployment'
       run: zip -r release.zip . -x ".git/*" ".github/*" "antenv/*" "*.pyc" "__pycache__/*" ".DS_Store"
@@ -45,27 +47,27 @@ jobs:
         app-name: ${{ secrets.AZURE_APP_NAME }}
         resource-group: ${{ secrets.AZURE_RESOURCE_GROUP_NAME }}
         package: release.zip
-        # slot-name: 'production' # Optional: if using deployment slots
 
-    # CORRECTED INDENTATION for the following step
+    # --- FIX APPLIED HERE ---
+    - name: Install dependencies for documentation script
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt # This will install to the Python used by setup-python
+
     - name: Generate and Publish Documentation
       env:
-        # These environment variables are set for the 'run' command below
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         CONFLUENCE_URL: ${{ secrets.CONFLUENCE_URL }}
         CONFLUENCE_EMAIL: ${{ secrets.CONFLUENCE_EMAIL }}
-        CONFLUENCE_API_TOKEN: ${{ secrets.CONFLUENCE_API_TOKEN }} # Ensuring consistent casing
+        CONFLUENCE_API_TOKEN: ${{ secrets.CONFLUENCE_API_TOKEN }}
         CONFLUENCE_SPACE_KEY: ${{ secrets.CONFLUENCE_SPACE_KEY }}
         ROOT_DOC_TITLE: "${{ github.repository }} - Project Docs"
-        # Consider if "app" is the correct path. If your main code (app.py etc.) is at the root,
-        # this might need to be "." or your doc_generator.py needs to handle it.
-        CODE_ROOT_PATH: "." # Assuming your main app.py is at the root, adjust if it's in an 'app' subfolder
+        CODE_ROOT_PATH: "."
         GITHUB_WORKSPACE: ${{ github.workspace }}
-      run: python scripts/doc_generator.py # Ensure this script exists and is executable
+      run: python scripts/doc_generator.py
 
-    # CORRECTED INDENTATION for the following step
-    - name: 'Logout from Azure' # Good practice
-      if: always() # Run this step even if previous steps fail
+    - name: 'Logout from Azure'
+      if: always()
       run: |
         az logout
         az account clear
