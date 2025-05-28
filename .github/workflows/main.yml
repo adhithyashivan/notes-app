@@ -43,22 +43,27 @@ jobs:
       uses: azure/webapps-deploy@v2
       with:
         app-name: ${{ secrets.AZURE_APP_NAME }}
-        resource-group: ${{ secrets.AZURE_RESOURCE_GROUP_NAME }} # Added for clarity
+        resource-group: ${{ secrets.AZURE_RESOURCE_GROUP_NAME }}
         package: release.zip
         # slot-name: 'production' # Optional: if using deployment slots
 
-      - name: Generate and Publish Documentation
-        env:
-          # These environment variables are set for the 'run' command below
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          CONFLUENCE_URL: ${{ secrets.CONFLUENCE_URL }}
-          CONFLUENCE_EMAIL: ${{ secrets.CONFLUENCE_EMAIL }}
-          CONFLUENCE_API_TOKEN: ${{ secrets.CONfluence_API_TOKEN }} # Corrected case from previous examples if it was wrong
-          CONFLUENCE_SPACE_KEY: ${{ secrets.CONFLUENCE_SPACE_KEY }}
-          ROOT_DOC_TITLE: "${{ github.repository }} - Project Docs"
-          CODE_ROOT_PATH: "app"
-          GITHUB_WORKSPACE: ${{ github.workspace }}
-        run: python scripts/doc_generator.py
+    # CORRECTED INDENTATION for the following step
+    - name: Generate and Publish Documentation
+      env:
+        # These environment variables are set for the 'run' command below
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        CONFLUENCE_URL: ${{ secrets.CONFLUENCE_URL }}
+        CONFLUENCE_EMAIL: ${{ secrets.CONFLUENCE_EMAIL }}
+        CONFLUENCE_API_TOKEN: ${{ secrets.CONFLUENCE_API_TOKEN }} # Ensuring consistent casing
+        CONFLUENCE_SPACE_KEY: ${{ secrets.CONFLUENCE_SPACE_KEY }}
+        ROOT_DOC_TITLE: "${{ github.repository }} - Project Docs"
+        # Consider if "app" is the correct path. If your main code (app.py etc.) is at the root,
+        # this might need to be "." or your doc_generator.py needs to handle it.
+        CODE_ROOT_PATH: "." # Assuming your main app.py is at the root, adjust if it's in an 'app' subfolder
+        GITHUB_WORKSPACE: ${{ github.workspace }}
+      run: python scripts/doc_generator.py # Ensure this script exists and is executable
+
+    # CORRECTED INDENTATION for the following step
     - name: 'Logout from Azure' # Good practice
       if: always() # Run this step even if previous steps fail
       run: |
