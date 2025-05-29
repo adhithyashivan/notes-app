@@ -4,6 +4,8 @@ import os
 import sys
 import json
 import time  # For potential rate limiting
+# For escaping content within CDATA if needed, though CDATA should handle most.
+import html
 
 # Attempt to import necessary libraries, provide guidance if missing
 try:
@@ -59,7 +61,6 @@ def find_files_to_document(code_root_path):
 
     abs_code_root_path = os.path.abspath(code_root_path)
     print(f"Starting scan in: {abs_code_root_path}")
-    # ... (optional: print ignored lists and target extensions) ...
     print("-" * 30)
 
     for root, dirs, files in os.walk(abs_code_root_path, topdown=True):
@@ -79,9 +80,9 @@ def generate_documentation_for_file(file_path, openai_client):
 
         if not content.strip():
             print(f"File {file_path} is empty. Skipping OpenAI call.")
-            return f"## Documentation for `{os.path.basename(file_path)}`\n\nFile is empty or contains only whitespace."
+            return (f"**File Overview:**\n\nThis file (`{os.path.basename(file_path)}`) "
+                    f"is empty or contains only whitespace.\n")
 
-        # Max content length consideration for OpenAI (e.g., 80k chars ~ 20k tokens)
         max_chars_for_openai = 80000
         if len(content) > max_chars_for_openai:
             print(
@@ -89,21 +90,42 @@ def generate_documentation_for_file(file_path, openai_client):
             content = content[:max_chars_for_openai] + \
                 "\n\n[CONTENT TRUNCATED DUE TO LENGTH]"
 
+        # --- MODIFIED PROMPT FOR SPECIFIC STRUCTURE ---
         prompt = (
-            f"Generate concise technical documentation in Markdown format for the following code file named '{os.path.basename(file_path)}'. "
-            "Focus on its purpose, main functions/classes, inputs, outputs, and key logic. "
-            "Use standard Markdown for headings, lists, bolding, etc.\n\n"
-            f"File Content:\n```\n{content}\n```"
+            f"Generate technical documentation for the Python code file named '{os.path.basename(file_path)}'. "
+            "The documentation should be in Markdown format and strictly follow this structure:\n\n"
+            "**File Overview:**\n[A brief, one or two-sentence overview of the file's purpose.]\n\n"
+            "**Functions:** (Only if functions are present)\n"
+            # Use backticks for the signature
+            "**Function:** `function_name(param1: type, param2: type) -> return_type`\n"
+            "**Purpose:** [Brief description of what the function does.]\n"
+            "**Parameters:** (Only if parameters are present)\n"
+            "- `param_name` (type): [Description of the parameter.]\n"
+            "**Returns:** (Only if it returns something other than None)\n"
+            "- (type): [Description of the return value.]\n"
+            "[Repeat for each function, separated by a blank line]\n\n"
+            "**Classes:** (Only if classes are present)\n"
+            "**Class:** `ClassName`\n"
+            "**Purpose:** [Brief description of the class.]\n"
+            "**Methods:** (Only if methods are present)\n"
+            "**Method:** `method_name(self, param1: type) -> return_type`\n"
+            "**Purpose:** [Description.]\n"
+            "[Repeat for each class and method, separated by a blank line]\n\n"
+            "Ensure all code signatures, parameter names, and class names are enclosed in backticks (`).\n"
+            "Use simple Markdown: ** for bold, newlines for separation. Do not use HTML tags.\n"
+            f"File Content:\n```python\n{content}\n```"
         )
+        # --- END OF MODIFIED PROMPT ---
+
         print(f"Sending content of {os.path.basename(file_path)} to OpenAI...")
         response = openai_client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-3.5-turbo-0125",  # Using a specific version might be more stable
             messages=[
-                {"role": "system", "content": "You are an expert technical writer assistant specializing in clear and concise code documentation in Markdown format."},
+                {"role": "system", "content": "You are an expert technical writer generating structured Markdown documentation for Python code, adhering strictly to the provided format."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.3,
-            max_tokens=2000  # Increased slightly for potentially longer docs
+            temperature=0.2,  # Even lower for more deterministic output adhering to format
+            max_tokens=2500
         )
         documentation = response.choices[0].message.content
         print(
@@ -111,15 +133,16 @@ def generate_documentation_for_file(file_path, openai_client):
         return documentation
     except openai.APIError as e:
         print(f"OpenAI API Error processing file {file_path}: {e}")
-        return f"## Error generating documentation for `{os.path.basename(file_path)}`\n\nOpenAI API Error: {e}"
+        return f"**Error:**\n\nOpenAI API Error processing file `{os.path.basename(file_path)}`: {e}\n"
     except Exception as e:
         print(f"Unexpected error processing file {file_path}: {e}")
-        return f"## Error generating documentation for `{os.path.basename(file_path)}`\n\nUnexpected error: {e}"
+        return f"**Error:**\n\nUnexpected error processing file `{os.path.basename(file_path)}`: {e}\n"
 
 
 def get_confluence_page_id(confluence_url, auth, space_key, title):
     search_url = f"{confluence_url.rstrip('/')}/rest/api/content"
-    params = {"spaceKey": space_key, "title": title, "expand": "version"}
+    params = {"spaceKey": space_key, "title": title,
+              "expand": "version", "limit": 1}
     try:
         response = requests.get(search_url, auth=auth, params=params, headers={
                                 "Accept": "application/json"}, timeout=10)
@@ -133,20 +156,32 @@ def get_confluence_page_id(confluence_url, auth, space_key, title):
 
 
 def create_or_update_confluence_page(confluence_url, auth, space_key, title, markdown_body_content, parent_id=None):
-    """
-    Creates or updates a page in Confluence, wrapping the markdown_body_content
-    in Confluence's Markdown macro for proper rendering.
-    """
     page_id, current_version = get_confluence_page_id(
         confluence_url, auth, space_key, title)
     rest_url = f"{confluence_url.rstrip('/')}/rest/api/content"
 
-    # Wrap the Markdown content in the Confluence Markdown macro (storage format)
+    # --- ATTEMPT TO FIX MACRO USAGE / ALTERNATIVE ---
+    # It's possible the "markdown" macro isn't available or named differently.
+    # The most robust way is to convert Markdown to Confluence Storage Format (XHTML) yourself.
+    # However, this is complex. Let's try to ensure the macro usage is as standard as possible.
+    # If this still fails, you might need to:
+    # 1. Check Confluence Admin for installed/enabled macros.
+    # 2. Manually create a page with Markdown, then view its storage format to see how your Confluence does it.
+    # 3. Use a library to convert MD to Confluence XHTML.
+
+    # Ensure the markdown_body_content doesn't contain CDATA terminators itself.
+    # While CDATA should handle most things, nested CDATA or accidental terminators are problematic.
+    # Simple replacement for this example; a more robust solution might involve proper XML escaping
+    # if the content could legitimately contain "]]>".
+    safe_markdown_body = markdown_body_content.replace("]]>", "]]>")
+
     confluence_storage_content = (
-        f'<ac:structured-macro ac:name="markdown" ac:schema-version="1">'
-        f'  <ac:plain-text-body><![CDATA[{markdown_body_content}]]></ac:plain-text-body>'
+        # Added macro-id
+        f'<ac:structured-macro ac:name="markdown" ac:schema-version="1" ac:macro-id="{str(uuid.uuid4())}">'
+        f'  <ac:plain-text-body><![CDATA[{safe_markdown_body}]]></ac:plain-text-body>'
         f'</ac:structured-macro>'
     )
+    # --- END OF MACRO ATTEMPT ---
 
     page_data = {
         "type": "page",
@@ -160,7 +195,8 @@ def create_or_update_confluence_page(confluence_url, auth, space_key, title, mar
         }
     }
     if parent_id:
-        page_data["ancestors"] = [{"id": parent_id}]
+        # Ensure parent_id is a string
+        page_data["ancestors"] = [{"id": str(parent_id)}]
 
     try:
         http_method = requests.put if page_id else requests.post
@@ -168,7 +204,7 @@ def create_or_update_confluence_page(confluence_url, auth, space_key, title, mar
         action_word = "Updating" if page_id else "Creating"
 
         if page_id:
-            page_data["id"] = page_id
+            page_data["id"] = str(page_id)  # Ensure page_id is a string
             page_data["version"] = {"number": current_version + 1}
 
         print(f"{action_word} Confluence page: '{title}'" +
@@ -177,7 +213,6 @@ def create_or_update_confluence_page(confluence_url, auth, space_key, title, mar
                                "Content-Type": "application/json", "Accept": "application/json"}, timeout=20)
         response.raise_for_status()
 
-        # Construct full web UI link
         base_url = confluence_url.rstrip('/')
         page_web_ui_path = response.json().get('_links', {}).get('webui', '')
         full_page_link = f"{base_url}{page_web_ui_path}" if page_web_ui_path else "N/A"
@@ -187,7 +222,12 @@ def create_or_update_confluence_page(confluence_url, auth, space_key, title, mar
 
     except requests.exceptions.HTTPError as e:
         print(
-            f"HTTP Error during Confluence operation for page '{title}': {e.response.status_code} - {e.response.text}")
+            f"HTTP Error during Confluence operation for page '{title}': {e.response.status_code}")
+        try:
+            # Attempt to print detailed error from Confluence
+            print(f"Confluence Error Body: {e.response.json()}")
+        except json.JSONDecodeError:
+            print(f"Confluence Error Body (not JSON): {e.response.text}")
     except requests.exceptions.RequestException as e:
         print(
             f"Request Error during Confluence operation for page '{title}': {e}")
@@ -199,6 +239,9 @@ def create_or_update_confluence_page(confluence_url, auth, space_key, title, mar
 
 # --- Main Execution ---
 if __name__ == "__main__":
+    # Import uuid here if not already at the top, for the macro-id
+    import uuid
+
     print("Doc Generator Script Started")
 
     openai_api_key = os.getenv("OPENAI_API_KEY")
@@ -239,7 +282,6 @@ if __name__ == "__main__":
     for f_path in files_to_process:
         print(f"  - {os.path.relpath(f_path, abs_code_root_path)}")
 
-    # Create/Update the root Confluence page
     root_page_markdown_content = (
         f"This page serves as the root for automatically generated documentation for the project.\n\n"
         f"Last updated: {time.strftime('%Y-%m-%d %H:%M:%S %Z')}\n\n"
@@ -256,32 +298,32 @@ if __name__ == "__main__":
         sys.exit(1)
     print(f"Project root page ID: {project_root_page_id}")
 
-    # Generate documentation for each file and publish as child pages
     for file_path in files_to_process:
         relative_file_path = os.path.relpath(file_path, abs_code_root_path)
         print(f"\nProcessing file: {relative_file_path}")
 
         documentation_markdown_from_ai = generate_documentation_for_file(
             file_path, openai_client)
-        if "Error generating documentation" in documentation_markdown_from_ai or \
-           "File is empty" in documentation_markdown_from_ai:  # Also skip empty file docs for Confluence
+
+        # Check for errors or if the file was empty
+        if "**Error:**" in documentation_markdown_from_ai or \
+           "file (`" in documentation_markdown_from_ai and "`) is empty" in documentation_markdown_from_ai:
             print(
                 f"Skipping Confluence update for {relative_file_path} due to generation issue or empty content.")
             continue
 
-        # Combine preamble with AI's markdown for the Confluence page body
-        final_markdown_for_page = (
+        preamble_markdown = (
             f"*Automatically generated documentation for `{relative_file_path}`.*\n\n"
             f"*Last updated: {time.strftime('%Y-%m-%d %H:%M:%S %Z')}*\n\n"
             f"---\n\n"
-            f"{documentation_markdown_from_ai}"
         )
+        final_markdown_for_page = preamble_markdown + documentation_markdown_from_ai
 
         page_title = f"Doc: {relative_file_path.replace(os.sep, ' - ')}"
         create_or_update_confluence_page(
             confluence_url, confluence_auth, confluence_space_key,
             page_title, final_markdown_for_page, parent_id=project_root_page_id
         )
-        time.sleep(2)  # Basic rate limiting
+        time.sleep(3)  # Increased rate limiting slightly
 
     print("\nDoc Generator Script Finished.")
