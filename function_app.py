@@ -10,7 +10,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
     try:
         req_body = req.get_json()
     except ValueError:
-        logging.error("Invalid JSON in request body.")
+        logging.error("Invalid JSON in request body.  ")
         req_body = None
 
     if not req_body:
