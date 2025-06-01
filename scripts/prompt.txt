@@ -1,0 +1,169 @@
+Generating Interconnected Project Management CSV Datasets
+
+Role: You are an expert data generation specialist. Your mission is to create a comprehensive and realistic set of sample CSV data representing project management and documentation activities within a fictional Fintech company.
+
+Core Objective: Generate five interconnected CSV datasets adhering strictly to the provided schemas, volume requirements, and data generation guidelines. The data must reflect a plausible project lifecycle.
+
+Optional Contextual Theme:
+To enhance realism, you can base the data on a narrative like "Project Nova - Mobile Wallet Beta Launch & Subsequent Hotfix." This involves:
+
+Teams: Team Phoenix (Backend), Team Griffin (Mobile), Team Hydra (QA/Security/Release).
+
+Users: A consistent set of ~20 users distributed across these teams.
+
+Activities: Initiation, development, QA, deployment, bug fixing, documentation.
+
+Output Specifications:
+
+Format: Provide the data as five distinct CSV content blocks.
+
+File Demarcation: Each block must begin with --- START OF FILE [Filename.csv] --- and end with --- END OF FILE [Filename.csv] ---. Ensure filenames are exactly as specified below.
+
+Headers: The first row of each CSV must be the header, exactly matching the column names specified in the schemas below.
+
+Delimiter: Use a comma (,) as the delimiter.
+
+Quoting: Enclose fields containing commas, newlines, or double quotes in double quotes ("). For simplicity in this generation task, primarily use simple text for data fields, minimizing internal commas/newlines unless a field is explicitly for longer text (e.g., CR_Description, JIRA_Description, Confluence_Content_Summary).
+
+Volume Requirements:
+
+JIRA_Issues_Detailed.csv: 70-75 unique JIRA issues (before accounting for row duplication due to links/watchers).
+
+CR_Main.csv: 21-24 unique Change Requests. Note: Status updates for the same CR_ID result in multiple rows for that CR_ID.
+
+Confluence_Pages_Detailed.csv: 20-25 unique Confluence pages.
+
+JIRA_Activities.csv: Generate at least 15-20 activity entries.
+
+CR_CTasks.csv: Generate at least 10-15 CTask entries.
+
+Entity Schemas (Strict Adherence Required):
+
+1. File: CR_Main.csv
+* CR_ID
+* CR_Title
+* Linked_Jira_ID
+* Linked_Confluence_ID
+* CR_State (Categorical: New, Assess, Authorise, Scheduled, Implement, Closed)
+* CR_Requested_By
+* CR_Team_Assignment_Group (Categorical: Team Phoenix, Team Griffin, Team Hydra, Marketing)
+* CR_Assigned_To_User
+* CR_Impacted_Environment (Categorical: Production, Staging, Development, N/A)
+* CR_Impacted_Departments (Text, semicolon-delimited if multiple)
+* CR_Type (Categorical: Standard, Emergency, Normal)
+* CR_Category (Categorical: Enhancement, BugFix, Security, Infrastructure, Deployment, Audit, Maintenance, New Feature, Communication)
+* CR_Risk (Categorical: Low, Medium, High)
+* CR_Risk_Percentage (Numeric, 0-100, or blank)
+* CR_Lead_Time_Days (Numeric)
+* CR_Conflict_Status (Categorical: No Conflict, Conflict Detected, Resolved)
+* CR_Description (Text)
+* CR_Start_Date (Date: YYYY-MM-DD)
+* CR_End_Date (Date: YYYY-MM-DD)
+* CR_Implementation_Plan_Summary (Text)
+* CR_Backout_Plan_Summary (Text)
+* CR_Updated_By_User_From_CSV_Example
+* CR_Created_At_From_CSV_Example (Date: YYYY-MM-DD, representing the date of this specific status record/row)
+
+2. File: CR_CTasks.csv
+* CTASK_ID
+* CR_ID (Foreign Key to CR_Main.csv)
+* CTASK_Assigned_To_User
+* CTASK_Start_Time (Timestamp: YYYY-MM-DD HH:MM)
+* CTASK_End_Time (Timestamp: YYYY-MM-DD HH:MM)
+* CTASK_Description (Text)
+
+3. File: JIRA_Issues_Detailed.csv
+* JIRA_ID (Primary Key for the issue. This ID will be REPEATED if the issue has multiple links or watchers, as detailed below.)
+* JIRA_Type (Categorical: Story, Task, Bug, Feature, Epic, Project, Business Outcome)
+* JIRA_Priority (Categorical: Minor, Major, Critical, Low, Medium, High)
+* JIRA_Components (Text, semicolon-delimited if multiple)
+* JIRA_Labels (Text, semicolon-delimited if multiple)
+* JIRA_Sprint (Text)
+* JIRA_App_Name (Text, or blank)
+* JIRA_Reporter
+* JIRA_Assignee
+* JIRA_Start_Date (Date: YYYY-MM-DD)
+* JIRA_End_Date (Date: YYYY-MM-DD)
+* JIRA_Status (Categorical: Pending, Development, Review, Release, Closed, Blocked, Open, In Progress)
+* JIRA_Title (Text)
+* JIRA_Description (Text)
+* JIRA_Release_Fix_Version (Text)
+* JIRA_Team (Categorical: Team Phoenix, Team Griffin, Team Hydra)
+* JIRA_Confidence (Numeric, 0-100, or blank)
+* JIRA_Created_Date (Date: YYYY-MM-DD)
+* JIRA_Updated_Date (Date: YYYY-MM-DD)
+* JIRA_Effort_Story_Points (Numeric)
+* CR_ID_Link_From_CSV_Example (Foreign Key to CR_Main.csv, or blank)
+* JIRA_Linked_Issue_ID_Target (Text, JIRA_ID of another JIRA issue this one links to. Populated only if this row represents an issue link. Otherwise, leave blank.)
+* JIRA_Link_Type (Categorical: blocks, relates to, duplicates, sub-task of, cloned by, etc. Populated only if this row represents an issue link. Otherwise, leave blank.)
+* JIRA_Watcher_User (Text, User name watching this JIRA. Populated only if this row represents a watcher. Otherwise, leave blank.)
+
+**Critical Instructions for Handling Multi-Valued Attributes in `JIRA_Issues_Detailed.csv` (Issue Links & Watchers):**
+Your image schemas for JIRA show "Issue links" and "Watchers" as inherent properties. To represent these in the CSV *without using delimited strings within a single cell and without creating additional, separate CSV files specifically named for these links/watchers*:
+
+*   If a JIRA issue (identified by a unique `JIRA_ID`) has **multiple issue links** OR **multiple watchers**:
+    1.  Each individual link OR each individual watcher **must be represented on a separate row** in this `JIRA_Issues_Detailed.csv` file.
+    2.  The `JIRA_ID` for the original issue will therefore be **duplicated** across these rows.
+    3.  All other core JIRA details for that `JIRA_ID` (e.g., `JIRA_Type`, `JIRA_Title`, `JIRA_Assignee`) **must also be duplicated** on each of these rows.
+    4.  **For a row representing an ISSUE LINK:** Populate `JIRA_Linked_Issue_ID_Target` and `JIRA_Link_Type`. The `JIRA_Watcher_User` field for this specific row should be blank.
+    5.  **For a row representing a WATCHER:** Populate `JIRA_Watcher_User`. The `JIRA_Linked_Issue_ID_Target` and `JIRA_Link_Type` fields for this specific row should be blank.
+    6.  If a JIRA issue has *no* links and *no* watchers, it will appear as a single row with `JIRA_Linked_Issue_ID_Target`, `JIRA_Link_Type`, and `JIRA_Watcher_User` fields blank.
+    7.  **Example:** If JIRA `NOVA-1` links to `NOVA-5` (type: "blocks") AND is watched by `UserA`:
+        *   Row 1: `NOVA-1, [all other NOVA-1 details...], JIRA_Linked_Issue_ID_Target=NOVA-5, JIRA_Link_Type=blocks, JIRA_Watcher_User=`
+        *   Row 2: `NOVA-1, [all other NOVA-1 details...], JIRA_Linked_Issue_ID_Target=, JIRA_Link_Type=, JIRA_Watcher_User=UserA`
+*   Please vary the number of links (0-2) and watchers (0-3) for different JIRA issues to demonstrate this structure.
+
+
+4. File: JIRA_Activities.csv
+* Activity_ID
+* JIRA_ID (Foreign Key to JIRA_Issues_Detailed.csv)
+* Activity_Comment (Text)
+* Activity_Timestamp (Timestamp: YYYY-MM-DD HH:MM)
+* Activity_User
+
+5. File: Confluence_Pages_Detailed.csv
+* Confluence_ID
+* Confluence_Title (Text)
+* Confluence_Owner_Member
+* Confluence_Last_Edited_By
+* Confluence_Space (Text)
+* Confluence_Team_Association (Categorical: Team Phoenix, Team Griffin, Team Hydra, Cross-functional, Marketing)
+* Confluence_Content_Summary (Text)
+* Confluence_Linked_Jira_ID (Text, semicolon-delimited list of JIRA_IDs; can be blank)
+* Confluence_Linked_CR_ID (Text, semicolon-delimited list of CR_IDs; can be blank)
+* Confluence_Parent_Page_ID (Foreign Key to another Confluence_ID, or blank)
+* Confluence_Created_Date (Date: YYYY-MM-DD)
+* Confluence_Last_Modified_Date (Date: YYYY-MM-DD)
+
+General Data Generation Guidelines:
+
+Strict Schema Adherence: Follow the column names and intended data types precisely. Do not add or omit columns.
+
+Interconnectivity: Ensure foreign key relationships are valid (e.g., CR_ID in CR_CTasks.csv must exist in CR_Main.csv). Use plausible IDs that link across files (e.g., a CR might link to a JIRA Epic, which links to JIRA Stories/Tasks, which might be referenced in Confluence).
+
+Logical Dates: Maintain chronological sense (e.g., End_Date after Start_Date; Activity_Timestamp within JIRA issue's lifecycle). Span data over a few months to represent ongoing work and historical data ("2 sprints passed").
+
+Consistent Users: Utilize a consistent set of ~20 user names (e.g., PM_Anna, Sarah_P, David_H, Alex_P_Dev, Ben_P_Dev, Chloe_P_Dev, Mark_G, Liam_G_Dev, Olivia_G_Dev, Noah_G_Dev, QA_Emma, Ethan_H_Sec, Ops_Jim, Marketer_Sue, User_Kate, User_Leo, User_Mia, User_Omar, User_Pia, User_Raj). Distribute them across teams and roles.
+
+Realistic Variety: Vary statuses, priorities, risks, assignments, etc., for different items.
+
+Concise Content: Keep text fields (descriptions, summaries) brief but relevant to the item's title and type.
+
+No Assumptions Beyond This Prompt: Adhere strictly to these instructions. Do not introduce new entities or complex unrequested relationships beyond what is implied by the schemas and linking fields.
+
+Final Check:
+Please ensure that the handling of JIRA issue links and watchers via row duplication in JIRA_Issues_Detailed.csv is implemented exactly as described. This is a critical requirement for the output structure.
+
+If any part of this prompt remains ambiguous for generating the precise output, please state the ambiguity before proceeding.
+
+How to Use This Prompt:
+
+Copy the entire text above.
+
+Paste it into a new session with GPT-4.
+
+GPT-4 should then process these instructions and generate the five CSV data blocks.
+
+You can then copy each block of CSV data (between the --- START --- and --- END --- markers) and save it into a local file with the corresponding filename (e.g., CR_Main.csv).
+
+This prompt aims to be exhaustive enough to minimize ambiguity and guide the AI to produce the data closely matching your detailed specifications.
